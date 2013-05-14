@@ -72,8 +72,9 @@
         n (dec (count den))
         num+ (reverse (take (inc n) (concat (reverse num) (repeat 0))))
         f #(/ % (double (first den)))
-        b (map f num+)  ;; a0 == 1.0
-        a (map f den)]
+        b (map f num+)
+        a (map f den)   ;; a0 == 1.0
+        ]
     [b,a]))
 
 (defn -main [& args]
