@@ -3,16 +3,16 @@
   (:import [java.util.concurrent Executors TimeUnit])
   (:gen-class))
 
-(def A (atom ()))
-(def B (atom ()))
-(def U (atom 0.0))
-(def X (atom [0.0]))
+(def A (atom [1.0 0.2 0.01])) ;; n=2
+(def B (atom [0.0 0.0 0.01]))
+(def U (atom 1.0))
+(def X (atom [0.0 0.0]))
 
 (defn dot-product [X1 X2]
   (let [X_ (map * X1 X2)]
     (reduce + X_)))
 
-(defn build-nth-dX [idx] ;; idx [1,n]
+(defn build-nth-dX [idx] ;; idx=[1..n]
   (if (< idx (dec (count @A))) 
     (fn [X]
       (nth X idx))
@@ -20,54 +20,75 @@
       (+ (* -1.0 (dot-product (reverse (rest @A)) X)) 
          @U))))
 
-(defn step [X]
-  (rk4V (map build-nth-dX (rest (range (count @A)))) 
-        1.0 
-        X))
-
-(defn build-nth-coff [idx] ;; idx [1,n]
+(defn build-nth-coff [idx] ;; idx=[n..1]
   (- (nth @B idx) (* (nth @A idx) (first @B))))
 
-(def scheduler (Executors/newScheduledThreadPool 1))
+(defn step []
+  (let [lst (rest (range (count @A))) ;; [1..n]
+        X+ (rk4V (map build-nth-dX lst) 1.0 @X)
+        K (map build-nth-coff (reverse lst))
+        _ (reset! X X+)
+        c (+ (dot-product K X+) (* (first @B) @U))
+        ]
+    c))
+
+;; zeta=1.0 omega=0.1
+;; [a0 a1 a2]=[1.0 0.2 0.01]
+;; [b0 b1 b2]=[0.0 0.0 0.01]
+;; u=1.0
+;; X=[0.0 0.0]
+(defn step2 []
+  (let [f1 second
+        f2 (fn [[x1 x2]]
+             (+ (* -0.01 x1) (* -0.2 x2) @U))
+        X+ (rk4V [f1 f2] 1.0 @X)
+        _ (reset! X X+)
+        c (* 0.01 (first X+))]
+    c))
 
 (def simu-thread 
   (proxy [Runnable] []
     (run []
       (let [u (read!)
             _ (reset! U u)
-            X+ (step @X)
-            _ (println "X+ = " X+)
-            K (map build-nth-coff (reverse (rest (range (count @A)))))
-            _ (println "K=" K)
-            c (+ (dot-product K X+)
-                 (* (first @B) u))]
-        (do 
-          (reset! X X+)
-          (write! u c)
-          )))))
+            c (step)]
+        (write! u c)))))
+
+(defn start-sim-object []
+  (let [scheduler (Executors/newScheduledThreadPool 1)]
+    (do
+      (println "sim object started ...")
+      (println "A=" @A)
+      (println "B=" @B)
+      (.scheduleAtFixedRate scheduler
+                            simu-thread
+                            1000
+                            1000
+                            TimeUnit/MILLISECONDS))))
+
+(defn parse-args [args]
+  (let [num (read-string (first args))
+        den (read-string (second args))
+        n (dec (count den))
+        num+ (reverse (take (inc n) (concat (reverse num) (repeat 0))))
+        f #(/ % (double (first den)))
+        b (map f num+)  ;; a0 == 1.0
+        a (map f den)]
+    [b,a]))
 
 (defn -main [& args]
   (if (connect!)
-    (if (not= (count args) 2)
+    (case (count args)
+      0 (do 
+          (reset! A [1.0 0.2 0.01])
+          (reset! B [0.0 0.0 0.01])
+          (start-sim-object))
+      2 (let [[b a] (parse-args args)]
+          (do
+            (reset! A a)
+            (reset! B b) 
+            (start-sim-object)))
       (println "usage: java -jar simtran.jar [1] [1,2,1]")
-      (let [num (read-string (first args))
-            den (read-string (second args))
-            n (count den)
-            num+ (reverse (take n (concat (reverse num) (repeat 0))))
-            f #(/ % (double (first den)))
-            a (map f num+)  ;; a0 == 1.0
-            b (map f den)]
-        
-        (do
-          (reset! A a)
-          (reset! B b)
-          (println a)
-          (println b)
-          (println "simtran started ...")
-          (.scheduleAtFixedRate scheduler
-                                simu-thread
-                                1000
-                                1000
-                                TimeUnit/MILLISECONDS))))
+      )
     (println "can't connect to database ...")))
 
